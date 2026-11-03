@@ -11,6 +11,8 @@
   - `Succeeded`：输出成功通知，该 Stack 标记 `done`，以后跳过。
   - 超出配额 / 限额：输出通知并标记 `done`。
   - 其他失败、登录失效：输出通知，同一类 6 小时内只发一次。
+  - 控制台页面类的临时错误（frame detached、没跳到 job 页、页面没加载出来等）：连续 3 轮才通知，中间任意一轮正常就清零。
+- 在最终确认 Apply 之前，任何一步失败都会刷新页面重试（最多 3 次），不会重复提交。调试时设 `OCI_APPLY_DEBUG=1` 打印完整堆栈。
 - 通知内容夹在 `OCI_FREE_REPORT_BEGIN` / `OCI_FREE_REPORT_END` 之间；`run.sh` 只把这部分打印到 stdout，方便交给 cron / 机器人直接转发。
 
 ## 文件

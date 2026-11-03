@@ -36,6 +36,8 @@ const JOB_WAIT_MS = 12 * 60 * 1000;
 const ATTENTION_REPORT_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const CAPACITY_REGEX = /out of (?:host )?capacity/i;
 const LIMIT_REGEX = /LimitExceeded|service limit|limit exceeded|quota/i;
+const TRANSIENT_ERROR_REGEX = /detached|destroyed|timed out|timeout|没有跳转到 job 页面|没有加载出来|找不到/i;
+const TRANSIENT_ERROR_REPORT_THRESHOLD = 3;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -133,7 +135,9 @@ function isLoginPage(page) {
 
 async function clickByText(frame, selector, text) {
     return frame.evaluate(({ selector, text }) => {
-        const root = document.querySelector('[role=dialog]') && selector.startsWith('dialog ') ? document.querySelector('[role=dialog]') : document;
+        const dialog = document.querySelector('[role=dialog]');
+        if (selector.startsWith('dialog ') && !dialog) return false;
+        const root = selector.startsWith('dialog ') ? dialog : document;
         const css = selector.replace(/^dialog /, '');
         const el = [...root.querySelectorAll(css)].find(node => node.innerText.trim() === text && !node.disabled);
         if (!el) return false;
@@ -152,7 +156,7 @@ function readJobState(text) {
 async function readJobLogs(page) {
     const found = await waitForConsoleFrame(page, /\bLogs\b/, 30000);
     if (!found) return '';
-    await clickByText(found.frame, '[role=tab]', 'Logs');
+    await clickByText(found.frame, '[role=tab]', 'Logs').catch(() => false);
     let text = '';
     for (let i = 0; i < 15; i++) {
         await sleep(2000);
@@ -184,6 +188,7 @@ async function waitForJob(page, jobUrl) {
 }
 
 async function handleJobResult(state, stack, page, result) {
+    stack.consecutiveErrors = 0;
     stack.lastJobUrl = result.url;
     stack.lastResult = result.state || 'pending';
     stack.lastCheckedAt = new Date().toISOString();
@@ -238,29 +243,49 @@ async function applyStack(state, stack, page) {
     await sleep(3000);
     if (isLoginPage(page)) return 'login';
 
-    // 控制台会先渲染旧版页面再切到新版，等新版出现后再稳一下才点。
-    let found = await waitForConsoleFrame(page, /General information/, 90000);
-    if (found) {
-        await sleep(5000);
-        found = await waitForConsoleFrame(page, /General information/, 30000);
+    // 控制台会先渲染旧版页面再切到新版，切换时 frame 会被销毁；在最终确认 Apply 之前遇到 detached 就重来。
+    let submitted = false;
+    for (let attempt = 1; !submitted; attempt++) {
+        let found = await waitForConsoleFrame(page, /General information/, 90000);
+        if (found) {
+            await sleep(5000);
+            found = await waitForConsoleFrame(page, /General information/, 30000);
+        }
+        if (!found) {
+            if (isLoginPage(page)) return 'login';
+            throw new Error('Stack 页面 90 秒内没有加载出来');
+        }
+        const { frame } = found;
+        try {
+            const actionsOpened = await frame.evaluate(() => {
+                const button = [...document.querySelectorAll('button')].find(node => node.getAttribute('aria-label') === 'Actions' || node.innerText.trim() === 'Actions');
+                if (!button) return false;
+                button.click();
+                return true;
+            });
+            if (!actionsOpened) throw new Error('找不到 Stack 的 Actions 按钮');
+            let menuClicked = false;
+            for (let i = 0; i < 10 && !menuClicked; i++) {
+                await sleep(1000);
+                menuClicked = await clickByText(frame, '[role=menuitem]', 'Apply');
+            }
+            if (!menuClicked) throw new Error('Actions 菜单里找不到 Apply');
+            let dialogClicked = false;
+            for (let i = 0; i < 10 && !dialogClicked; i++) {
+                await sleep(1000);
+                dialogClicked = await clickByText(frame, 'dialog button', 'Apply');
+            }
+            if (!dialogClicked) throw new Error('Apply 对话框里找不到 Apply 按钮');
+            submitted = true;
+        } catch (error) {
+            // 最终确认按钮点下之前的失败都可以安全重来，不会重复提交。
+            if (attempt >= 3) throw error;
+            console.log(`[${stack.label}] ${error.message.slice(0, 80)}，刷新后重试第 ${attempt} 次`);
+            await page.keyboard.press('Escape').catch(() => {});
+            await page.goto(stackUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+            await sleep(3000);
+        }
     }
-    if (!found) {
-        if (isLoginPage(page)) return 'login';
-        throw new Error('Stack 页面 90 秒内没有加载出来');
-    }
-    const { frame } = found;
-
-    const actionsOpened = await frame.evaluate(() => {
-        const button = [...document.querySelectorAll('button')].find(node => node.getAttribute('aria-label') === 'Actions' || node.innerText.trim() === 'Actions');
-        if (!button) return false;
-        button.click();
-        return true;
-    });
-    if (!actionsOpened) throw new Error('找不到 Stack 的 Actions 按钮');
-    await sleep(1500);
-    if (!await clickByText(frame, '[role=menuitem]', 'Apply')) throw new Error('Actions 菜单里找不到 Apply');
-    await sleep(3000);
-    if (!await clickByText(frame, 'dialog button', 'Apply')) throw new Error('Apply 对话框里找不到 Apply 按钮');
     console.log(`[${stack.label}] 已提交 Apply`);
 
     const deadline = Date.now() + 60000;
@@ -306,6 +331,13 @@ async function main() {
                 await handleJobResult(state, stack, page, result);
             } catch (error) {
                 console.log(`[${stack.label}] 出错: ${error.message}`);
+                if (process.env.OCI_APPLY_DEBUG) console.log(error.stack);
+                // 控制台偶发的页面问题下一轮通常自己就好了，连续出现才提醒。
+                stack.consecutiveErrors = (stack.consecutiveErrors || 0) + 1;
+                if (TRANSIENT_ERROR_REGEX.test(error.message) && stack.consecutiveErrors < TRANSIENT_ERROR_REPORT_THRESHOLD) {
+                    console.log(`[${stack.label}] 临时错误（连续第 ${stack.consecutiveErrors} 次），下轮重试`);
+                    continue;
+                }
                 reportAttention(state, `error-${stack.ocid}`, [
                     `Oracle 免费实例：${stack.label} 自动 Apply 出错`,
                     error.message.slice(0, 200),
