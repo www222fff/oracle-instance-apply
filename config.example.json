@@ -1,0 +1,13 @@
+{
+  "cdpUrl": "http://127.0.0.1:9222",
+  "stateFile": "state.json",
+  "chromeHelper": null,
+  "stacks": [
+    {
+      "label": "ARM A1.Flex",
+      "name": "my-a1-stack",
+      "ocid": "ocid1.ormstack.oc1.us-ashburn-1.<stack-id>",
+      "region": "us-ashburn-1"
+    }
+  ]
+}

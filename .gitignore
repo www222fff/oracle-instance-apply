@@ -1,0 +1,9 @@
+node_modules
+config.json
+local.env
+local/
+dist/
+state.json
+*.zip
+*.tfstate
+*.tfstate.*

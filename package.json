@@ -1,0 +1,13 @@
+{
+  "name": "oracle-instance-apply",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Periodically click Apply on an Oracle Cloud Resource Manager stack through a logged-in CDP Chrome to grab Always Free instances.",
+  "scripts": {
+    "apply": "node oci-apply-stack.js",
+    "zip": "./make-stack-zip.sh"
+  },
+  "dependencies": {
+    "puppeteer-core": "25.1.0"
+  }
+}
