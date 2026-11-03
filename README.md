@@ -65,6 +65,51 @@ node oci-upload-stack.js <stack-ocid> <region> <Chrome 能访问的 zip 路径>
 
 上传后建议在控制台对 Stack 跑一次 Plan，确认只有 `1 to add`（以及可能的 `1 to import`），没有 destroy。
 
+## 从零开始的完整步骤
+
+下面是实际搭起来时走过的流程，按顺序做即可。
+
+### 1. 准备 Stack
+
+1. 在 Oracle Cloud 控制台走一遍“创建实例”（选 `VM.Standard.A1.Flex` 等 Always Free 规格），最后不要点 Create，点 **Save as stack**，得到一个 Resource Manager Stack。
+2. 打开这个 Stack → Details → Terraform configuration → **Download**，拿到它的 zip，解压出 `main.tf`。
+3. 在 Stack 的 **Jobs** 里看历史 Apply 的日志。如果报 `The requested CIDR ... overlaps`，说明 VCN 里已经有同网段子网但不在 Terraform state 里，每次 Apply 都会卡在建子网，根本走不到创建实例。
+
+### 2. 改 Terraform 配置
+
+以 `terraform/main.tf` 为模板，把导出的 `main.tf` 改成：
+
+1. 可用域改成按时间轮换（`data "oci_identity_availability_domains"` + `locals`），实例加 `lifecycle { ignore_changes = [availability_domain] }`。
+2. `create_vnic_details` 里 `assign_public_ip = "true"`，否则实例没有公网 IP。
+3. 如果第 1 步看到 CIDR 重叠：加 `import` 块导入现有子网，并把子网的 `display_name`、`dns_label` 改成和现有子网完全一致（不一致会被判定为 forces replacement，Terraform 会删掉重建子网）。
+4. 改好的个人版本放在 `local/main.tf`（已被 git 忽略）。
+
+### 3. 上传并用 Plan 验证
+
+1. `./make-stack-zip.sh local <Chrome 能访问的路径>/stack.zip`
+2. `node oci-upload-stack.js <stack-ocid> <region> <同一个 zip 的路径>`：直接打开 `/stacks/<ocid>/edit?fromStack=1`，上传 zip，两次 Next，确认没勾 Run apply，Save changes。
+3. 在控制台对 Stack 点 **Plan**，看日志里的汇总行。期望是 `Plan: 1 to import, 1 to add, 0 to change, 0 to destroy`（没有 import 时是 `1 to add`）。出现 `to destroy` 或 `must be replaced` 就回到第 2 步对齐属性。
+
+### 4. 让 Chrome 保持登录
+
+1. 用一个固定 profile 启动带 `--remote-debugging-port` 的 Chrome，在里面登录 `cloud.oracle.com`。
+2. Chrome 设置 → 隐私 → Cookie：给 `[*.]oracle.com`、`[*.]oraclecloud.com` 加“始终允许”例外（如果同步设置里开了“退出时清除 Cookie”，不加例外重启就会掉登录）。
+3. Chrome 设置 → 启动时 → **继续浏览上次打开的网页**，这样会话 Cookie 在重启后也能保留。
+4. Oracle 控制台 → Identity & Security → Domains → Default → Settings → **Edit session settings**，把 Session duration 从默认 480 分钟改到 32767 分钟（约 22 天）。
+5. 验证：正常关闭再打开 Chrome，打开 Stack 列表页，不跳登录页就算成功。
+
+### 5. 配置并试跑
+
+1. `cp config.example.json config.json`，填 `cdpUrl`、`stacks`；需要自动拉起 Chrome 时填 `chromeHelper`。
+2. `cp local.env.example local.env`，按需设置锁文件（和其他操作同一个 Chrome 的任务共用一把锁）。
+3. 手动跑一轮：`./run.sh`，再看 `OCI_APPLY_LAST_LOG`。期望看到 `已提交 Apply`，以及 `容量不足（Out of host capacity），下轮重试` 或成功。
+
+### 6. 定时运行
+
+1. 用 cron（或其他调度器）每 30 分钟执行一次 `run.sh`，把它的 stdout 转发到通知渠道；stdout 为空时说明这一轮不需要通知。
+2. 抢到后该 Stack 自动标记 `done` 不再 Apply，到 Compute → Instances 查看公网 IP。
+3. 想加别的规格（比如 `VM.Standard.E2.1.Micro`），按第 1–3 步再做一个 Stack，追加到 `config.json` 的 `stacks`。
+
 ## 控制台注意点
 
 - 后台标签页里 OCI 控制台的 iframe 不渲染正文，脚本会 `bringToFront()`。
