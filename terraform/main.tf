@@ -4,6 +4,10 @@ variable "tenancy_ocid" {}
 
 variable "compartment_ocid" {}
 
+variable "ssh_public_key" {
+	description = "登录实例用的 SSH 公钥（ssh-ed25519 / ssh-rsa 开头的一整行）"
+}
+
 variable "image_ocid" {
 	description = "启动镜像 OCID（Compute → Images 里选和 A1 兼容的 aarch64 镜像）"
 }
@@ -112,6 +116,9 @@ resource "oci_core_instance" "generated_oci_core_instance" {
 		subnet_id = "${oci_core_subnet.generated_oci_core_subnet.id}"
 	}
 	display_name = "free-a1-instance"
+	metadata = {
+		ssh_authorized_keys = var.ssh_public_key
+	}
 	instance_options {
 		are_legacy_imds_endpoints_disabled = "true"
 	}

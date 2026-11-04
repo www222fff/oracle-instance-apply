@@ -55,7 +55,8 @@ cp local.env.example local.env       # 可选
 
 - 可用域不写死：按 Apply 时的 UTC 时间每 `ad_rotate_minutes`（默认 5）分钟一个槽位，`floor((小时*60 + 分钟) / ad_rotate_minutes) % AD 数` 轮换，和定时间隔一致时每轮换一个可用域。实例上 `ignore_changes = [availability_domain]`，建好后再 Apply 不会重建。
 - `assign_public_ip = "true"`，实例创建后有公网 IP。
-- `compartment_ocid`、`tenancy_ocid` 由 Resource Manager 自动注入；`image_ocid` 需要在 Stack 变量里填。
+- `compartment_ocid`、`tenancy_ocid` 由 Resource Manager 自动注入；`image_ocid` 和 `ssh_public_key` 需要在 Stack 变量里填。
+- `ssh_public_key` 一定要在抢到之前填好：公钥只在实例第一次开机时写入，事后改 Stack 不会生效，镜像默认也没有密码。
 - 如果 Apply 报 `CIDR ... overlaps`，说明 VCN 里已有同网段子网但不在 state 里。按文件里注释打开 `import` 块填现有子网 OCID，并让子网的 `display_name` / `dns_label` 与现有子网一致。
 
 上传到已有 Stack：
@@ -83,8 +84,9 @@ node oci-upload-stack.js <stack-ocid> <region> <Chrome 能访问的 zip 路径>
 
 1. 可用域改成按时间轮换（`data "oci_identity_availability_domains"` + `locals`），实例加 `lifecycle { ignore_changes = [availability_domain] }`。
 2. `create_vnic_details` 里 `assign_public_ip = "true"`，否则实例没有公网 IP。
-3. 如果第 1 步看到 CIDR 重叠：加 `import` 块导入现有子网，并把子网的 `display_name`、`dns_label` 改成和现有子网完全一致（不一致会被判定为 forces replacement，Terraform 会删掉重建子网）。
-4. 改好的个人版本放在 `local/main.tf`（已被 git 忽略）。
+3. 实例里加 `metadata = { ssh_authorized_keys = "<你的公钥>" }`，否则抢到也登不进去。公钥只写在 `local/main.tf` 里，不要提交。
+4. 如果第 1 步看到 CIDR 重叠：加 `import` 块导入现有子网，并把子网的 `display_name`、`dns_label` 改成和现有子网完全一致（不一致会被判定为 forces replacement，Terraform 会删掉重建子网）。
+5. 改好的个人版本放在 `local/main.tf`（已被 git 忽略）。
 
 ### 3. 上传并用 Plan 验证
 
