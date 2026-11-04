@@ -114,12 +114,21 @@ async function openOwnTab() {
     return { page, close };
 }
 
+// frame 已 detached 时 puppeteer 的 evaluate 是同步抛错，链式 .catch() 接不住，统一走这里。
+async function evaluateSafely(frame, fn, arg, fallback) {
+    try {
+        return await frame.evaluate(fn, arg);
+    } catch {
+        return fallback;
+    }
+}
+
 // OCI 控制台正文渲染在同源 iframe 里；返回正文里包含 marker 的那个 frame。
 async function waitForConsoleFrame(page, markerRegex, timeoutMs = 90000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         for (const frame of page.frames()) {
-            const text = await withTimeout(frame.evaluate(() => document.body ? document.body.innerText : ''), 8000, 'frame text').catch(() => '');
+            const text = await withTimeout(evaluateSafely(frame, () => document.body ? document.body.innerText : '', undefined, ''), 8000, 'frame text').catch(() => '');
             if (markerRegex.test(text)) return { frame, text };
         }
         await sleep(2000);
@@ -160,12 +169,12 @@ async function readJobLogs(page) {
     let text = '';
     for (let i = 0; i < 15; i++) {
         await sleep(2000);
-        await found.frame.evaluate(() => {
+        await evaluateSafely(found.frame, () => {
             document.querySelectorAll('*').forEach(node => {
                 if (node.scrollHeight > node.clientHeight + 50) node.scrollTop = node.scrollHeight;
             });
-        }).catch(() => {});
-        text = await found.frame.evaluate(() => document.body.innerText).catch(() => text);
+        });
+        text = await evaluateSafely(found.frame, () => document.body.innerText, undefined, text);
         if (CAPACITY_REGEX.test(text) || /Apply complete/i.test(text)) return text;
     }
     return text;

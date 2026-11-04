@@ -12,7 +12,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function findFrame(page, predicate, arg, tries = 45) {
     for (let i = 0; i < tries; i++) {
         for (const frame of page.frames()) {
-            if (await frame.evaluate(predicate, arg).catch(() => false)) return frame;
+            // frame 已 detached 时 evaluate 是同步抛错，链式 .catch() 接不住。
+            try {
+                if (await frame.evaluate(predicate, arg)) return frame;
+            } catch {}
         }
         await sleep(2000);
     }

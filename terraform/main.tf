@@ -22,7 +22,9 @@ data "oci_identity_availability_domains" "ads" {
 
 locals {
 	ad_names = sort(data.oci_identity_availability_domains.ads.availability_domains[*].name)
-	ad_slot = parseint(formatdate("hh", timestamp()), 10) * 2 + floor(parseint(formatdate("mm", timestamp()), 10) / 30)
+	# 和定时任务的间隔保持一致，每轮 Apply 换下一个可用域。
+	ad_rotate_minutes = 5
+	ad_slot = floor((parseint(formatdate("hh", timestamp()), 10) * 60 + parseint(formatdate("mm", timestamp()), 10)) / local.ad_rotate_minutes)
 	availability_domain = local.ad_names[local.ad_slot % length(local.ad_names)]
 }
 

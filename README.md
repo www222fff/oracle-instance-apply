@@ -43,17 +43,17 @@ cp local.env.example local.env       # 可选
 - `chromeHelper`：可选，一个导出 `ensureWindowsChrome(startUrl)`（和可选的 `forceNoProxyEnv()`）的模块路径，用来按需拉起 Chrome；不填就只检查 `cdpUrl` 能不能连上。
 - `stacks`：`[{ label, name, ocid, region }]`。
 
-定时运行（例子，每 30 分钟）：
+定时运行（例子，每 5 分钟）：
 
 ```cron
-*/30 * * * * /path/to/oracle-instance-apply/run.sh
+*/5 * * * * /path/to/oracle-instance-apply/run.sh
 ```
 
 ## Terraform 模板
 
 `terraform/main.tf` 是从控制台“创建实例 → Save as stack”导出的配置改出来的：
 
-- 可用域不写死：按 Apply 时的 UTC 时间每 30 分钟一个槽位，`(小时*2 + 分钟/30) % AD 数` 轮换。实例上 `ignore_changes = [availability_domain]`，建好后再 Apply 不会重建。
+- 可用域不写死：按 Apply 时的 UTC 时间每 `ad_rotate_minutes`（默认 5）分钟一个槽位，`floor((小时*60 + 分钟) / ad_rotate_minutes) % AD 数` 轮换，和定时间隔一致时每轮换一个可用域。实例上 `ignore_changes = [availability_domain]`，建好后再 Apply 不会重建。
 - `assign_public_ip = "true"`，实例创建后有公网 IP。
 - `compartment_ocid`、`tenancy_ocid` 由 Resource Manager 自动注入；`image_ocid` 需要在 Stack 变量里填。
 - 如果 Apply 报 `CIDR ... overlaps`，说明 VCN 里已有同网段子网但不在 state 里。按文件里注释打开 `import` 块填现有子网 OCID，并让子网的 `display_name` / `dns_label` 与现有子网一致。
@@ -108,7 +108,7 @@ node oci-upload-stack.js <stack-ocid> <region> <Chrome 能访问的 zip 路径>
 
 ### 6. 定时运行
 
-1. 用 cron（或其他调度器）每 30 分钟执行一次 `run.sh`，把它的 stdout 转发到通知渠道；stdout 为空时说明这一轮不需要通知。
+1. 用 cron（或其他调度器）每 5 分钟执行一次 `run.sh`（一轮约 1.5–2 分钟，不建议再短；改间隔时同步改 `ad_rotate_minutes`），把它的 stdout 转发到通知渠道；stdout 为空时说明这一轮不需要通知。
 2. 抢到后该 Stack 自动标记 `done` 不再 Apply，到 Compute → Instances 查看公网 IP。
 3. 想加别的规格（比如 `VM.Standard.E2.1.Micro`），按第 1–3 步再做一个 Stack，追加到 `config.json` 的 `stacks`。
 

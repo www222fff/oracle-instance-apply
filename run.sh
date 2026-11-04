@@ -9,9 +9,10 @@ export NO_PROXY="127.0.0.1,localhost"
 export no_proxy="127.0.0.1,localhost"
 LOCK_FILE="${OCI_APPLY_LOCK_FILE:-/tmp/oracle-instance-apply.lock}"
 LAST_LOG="${OCI_APPLY_LAST_LOG:-/tmp/oracle-instance-apply.last.log}"
+LOCK_WAIT="${OCI_APPLY_LOCK_WAIT:-600}"
 
 exec 9>"$LOCK_FILE"
-if ! flock -w 600 9; then
+if ! flock -w "$LOCK_WAIT" 9; then
   exit 0
 fi
 
