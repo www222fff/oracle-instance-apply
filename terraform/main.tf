@@ -8,10 +8,6 @@ variable "ssh_public_key" {
 	description = "登录实例用的 SSH 公钥（ssh-ed25519 / ssh-rsa 开头的一整行）"
 }
 
-variable "image_ocid" {
-	description = "启动镜像 OCID（Compute → Images 里选和 A1 兼容的 aarch64 镜像）"
-}
-
 # 如果 VCN 里已经有同网段的子网（比如之前 Apply 失败留下的），Apply 会报 CIDR overlaps。
 # 这时取消下面的注释，填入现有子网的 OCID，并让下面子网的 display_name / dns_label 和现有子网保持一致，
 # 否则 Terraform 会删掉重建子网。Terraform 1.5 的 import id 只能写字面量。
@@ -19,6 +15,20 @@ variable "image_ocid" {
 # 	to = oci_core_subnet.generated_oci_core_subnet
 # 	id = "ocid1.subnet.oc1.<region>.<subnet-id>"
 # }
+
+# 每次 Apply 自动选最新的 Ubuntu 24.04 ARM 镜像（登录用户名 ubuntu）。
+data "oci_core_images" "ubuntu" {
+	compartment_id = var.tenancy_ocid
+	operating_system = "Canonical Ubuntu"
+	operating_system_version = "24.04"
+	shape = "VM.Standard.A1.Flex"
+	sort_by = "TIMECREATED"
+	sort_order = "DESC"
+}
+
+output "image_name" {
+	value = data.oci_core_images.ubuntu.images[0].display_name
+}
 
 data "oci_identity_availability_domains" "ads" {
 	compartment_id = var.tenancy_ocid
@@ -106,7 +116,7 @@ resource "oci_core_instance" "generated_oci_core_instance" {
 	}
 	availability_domain = local.availability_domain
 	lifecycle {
-		ignore_changes = [availability_domain]
+		ignore_changes = [availability_domain, source_details[0].source_id]
 	}
 	compartment_id = var.compartment_ocid
 	create_vnic_details {
@@ -129,7 +139,7 @@ resource "oci_core_instance" "generated_oci_core_instance" {
 		ocpus = "1"
 	}
 	source_details {
-		source_id = var.image_ocid
+		source_id = data.oci_core_images.ubuntu.images[0].id
 		source_type = "image"
 	}
 }

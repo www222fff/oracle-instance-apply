@@ -55,7 +55,8 @@ cp local.env.example local.env       # 可选
 
 - 可用域不写死：按 Apply 时的 UTC 时间每 `ad_rotate_minutes`（默认 5）分钟一个槽位，`floor((小时*60 + 分钟) / ad_rotate_minutes) % AD 数` 轮换，和定时间隔一致时每轮换一个可用域。实例上 `ignore_changes = [availability_domain]`，建好后再 Apply 不会重建。
 - `assign_public_ip = "true"`，实例创建后有公网 IP。
-- `compartment_ocid`、`tenancy_ocid` 由 Resource Manager 自动注入；`image_ocid` 和 `ssh_public_key` 需要在 Stack 变量里填。
+- `compartment_ocid`、`tenancy_ocid` 由 Resource Manager 自动注入；`ssh_public_key` 需要在 Stack 变量里填。
+- 镜像不写死：每次 Apply 用 `oci_core_images` 查询最新的 Ubuntu 24.04 aarch64 镜像（登录用户名 `ubuntu`），实例上忽略之后的镜像变化，不会因为出了新镜像而重建。
 - `ssh_public_key` 一定要在抢到之前填好：公钥只在实例第一次开机时写入，事后改 Stack 不会生效，镜像默认也没有密码。
 - 如果 Apply 报 `CIDR ... overlaps`，说明 VCN 里已有同网段子网但不在 state 里。按文件里注释打开 `import` 块填现有子网 OCID，并让子网的 `display_name` / `dns_label` 与现有子网一致。
 
